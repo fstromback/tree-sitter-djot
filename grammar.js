@@ -17,7 +17,9 @@ module.exports = grammar({
   ],
 
   rules: {
-    document: ($) => repeat($._block),
+    document: ($) => $._inline_line,
+    // document: ($) => seq($._inline_no_outer_whitespace, $._newline),
+    // document: ($) => repeat($._block),
 
     // Every block contains a newline.
     _block: ($) => choice($._block_without_standalone_newline, $._newline),
@@ -419,70 +421,97 @@ module.exports = grammar({
 
     _whitespace: (_) => token.immediate(/[ \t]*/),
     _whitespace1: (_) => token.immediate(/[ \t]+/),
+    _whitespace_newline: (_) => token.immediate(/[ \t\n\r]*/),
 
-    _inline: ($) => repeat1(choice($._inline_no_spaces, " ")),
-    _inline_no_spaces: ($) =>
-      choice(
-        seq(
-          choice(
-            $.autolink,
-            $.emphasis,
-            $.strong,
-            $.highlighted,
-            $.superscript,
-            $.subscript,
-            $.insert,
-            $.delete,
-            $._smart_punctuation,
-            $.verbatim,
-            $.math,
-            $.raw_inline,
-            $.footnote_reference,
-            $.hard_line_break,
-            $.symbol,
-            $.span,
-            $._image,
-            $._link,
-            $._text
-          ),
-          optional($.inline_attribute)
-        ),
-        $.span
-      ),
-    _inline_no_surrounding_spaces: ($) =>
-      choice(
-        repeat1(prec.left($._inline_no_spaces)),
-        seq($._inline_no_spaces, $._inline, $._inline_no_spaces)
-      ),
-    _inline_with_newlines: ($) =>
-      repeat1(prec.left(choice($._inline, " ", $._newline))),
+    _inline: ($) => seq(
+      $._whitespace,
+      repeat(seq(
+	$._inline_internal,
+	$._whitespace
+      ))
+    ),
+    _inline_with_newlines: ($) => seq(
+      $._whitespace_newline,
+      repeat(seq(
+	$._inline_internal,
+	$._whitespace_newline
+      ))
+    ),
     _inline_line: ($) => seq($._inline, $._newline),
+
+    // Does not match surrounding whitespace.
+    _inline_no_outer_whitespace: ($) => prec(10, seq(
+      $._inline_internal,
+      repeat(seq($._whitespace, $._inline_internal))
+    )),
+    _inline_newline_no_outer_whitespace: ($) => seq(
+      $._inline_internal,
+      repeat(seq($._whitespace_newline, $._inline_internal))
+    ),
+
+    // Piece of an inline paragraph. Does not consume whitespaces before or
+    // after the piece itself.
+    _inline_internal: ($) => choice(
+      // $.autolink,
+      $.emphasis,
+      $.strong,
+      // $.highlighted,
+      // $.superscript,
+      // $.subscript,
+      // $.insert,
+      // $.delete,
+      // $._smart_punctuation,
+      // $.verbatim,
+      // $.math,
+      // $.raw_inline,
+      // $.footnote_reference,
+      // $.hard_line_break,
+      // $.symbol,
+      // $.span,
+      // $._image,
+      // $._link,
+      $._space_fallbacks,
+      $._text_no_special,
+      $._text_escape,
+    ),
+
+    // This needs to include all starting chars for special constructs:
+    _text_no_special: ($) => token.immediate(/[^\s_*\-\\\[\{:%\$]+/),
+    // TODO: We can replace the second char with something more specific to only allow escaping certain characters
+    _text_escape: ($) => token.immediate(/\\[^\\]/),
+
+    // Fallbacks for things that may appear alone (with improper spacing) in regular text.
+    _space_fallbacks: ($) => seq(choice(
+      $._strong_begin,
+      $._emphasis_begin,
+    ), optional($._whitespace), $._inline_internal),
 
     autolink: (_) => token(seq("<", /[^>\s]+/, ">")),
 
-    // FIXME errors out if there's spaces instead of parsing other inline options
-    // need to somehow tell it to explore all possibilities?
-    emphasis: ($) =>
-      seq($._emphasis_begin, $._inline_no_surrounding_spaces, $._emphasis_end),
-    _emphasis_begin: (_) => token(choice(seq("{_", /[ ]*/), "_")),
+    emphasis: ($) => seq($._emphasis_begin, $._inline_no_outer_whitespace, $._emphasis_end),
+    _emphasis_begin: (_) => token.immediate(choice(seq("{_", /[ ]*/), "_")),
     _emphasis_end: (_) => token.immediate(choice(seq(/[ ]*/, "_}"), "_")),
 
-    strong: ($) =>
-      seq($._strong_begin, $._inline_no_surrounding_spaces, $._strong_end),
-    _strong_begin: (_) => token(choice(seq("{*", /[ ]*/), "*")),
+    strong: ($) => seq($._strong_begin, $._inline_no_outer_whitespace, $._strong_end),
+    _strong_begin: (_) => token.immediate(choice(seq("{*", /[ ]*/), "*")),
     _strong_end: (_) => token.immediate(choice(seq(/[ ]*/, "*}"), "*")),
 
-    highlighted: ($) => prec.left(seq("{=", $._inline, "=}")),
-    insert: ($) => prec.left(seq("{+", $._inline, "+}")),
-    delete: ($) => prec.left(seq("{-", $._inline, "-}")),
+    highlighted: ($) => seq(token.immediate("{="), $._inline, "=}"),
+    insert: ($) => seq(token.immediate("{+"), $._inline, "+}"),
+
+    delete: ($) => seq(token.immediate("{-"), $._inline, "-}"),
     symbol: (_) => token(seq(":", /[^:\s]+/, ":")),
 
     // The syntax description isn't clear about this.
     // Can the non-bracketed versions include spaces?
-    superscript: ($) =>
-      prec.left(seq(choice("{^", "^"), $._inline, choice("^}", "^"))),
-    subscript: ($) =>
-      prec.left(seq(choice("{~", "~"), $._inline, choice("~}", "~"))),
+    superscript: ($) => choice(
+      seq(token.immediate("{^"), $._inline, "^}"),
+      seq(token.immediate("^"), $._inline_no_outer_whitespace, "^")
+    ),
+    subscript: ($) => choice(
+      seq(token.immediate("{~"), $._inline, "~}"),
+      seq(token.immediate("~"), $._inline_no_outer_whitespace, "~")
+    ),
 
     _smart_punctuation: ($) =>
       choice($.escaped_quote, $.ellipsis, $.em_dash, $.en_dash),
