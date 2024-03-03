@@ -14,6 +14,7 @@ module.exports = grammar({
     //   [$._list_item_plus, $.list_marker_task],
     [$._table_content],
     [$.table_caption],
+    [$._inline_internal, $.strong, $._strong_begin, $._fallbacks, $._text_lowprec],
   ],
 
   rules: {
@@ -459,7 +460,7 @@ module.exports = grammar({
       // $.superscript,
       // $.subscript,
       // $.insert,
-      // $.delete,
+      $.delete,
       // $._smart_punctuation,
       // $.verbatim,
       // $.math,
@@ -470,31 +471,35 @@ module.exports = grammar({
       // $.span,
       // $._image,
       // $._link,
-      $._space_fallbacks,
-      $._text_no_special,
       $._text_escape,
+      $._fallbacks,
+      $._text_lowprec,
     ),
 
     // This needs to include all starting chars for special constructs:
     _text_no_special: ($) => token.immediate(/[^\s_*\-\\\[\{:%\$]+/),
     // TODO: We can replace the second char with something more specific to only allow escaping certain characters
     _text_escape: ($) => token.immediate(/\\[^\\]/),
-
-    // Fallbacks for things that may appear alone (with improper spacing) in regular text.
-    _space_fallbacks: ($) => seq(choice(
-      $._strong_begin,
-      $._emphasis_begin,
-    ), optional($._whitespace), $._inline_internal),
+    // Fallbacks, to use GLR to recover more nicely from errors.
+    _fallbacks: ($) => prec(-50, seq(
+      choice(
+	token.immediate("*"),
+	token.immediate("{-"),
+      ),
+      $._whitespace
+    )),
+    // Note: Only matches a single char.
+    _text_lowprec: ($) => prec(-50, token.immediate(prec(-50, /\S/))),
 
     autolink: (_) => token(seq("<", /[^>\s]+/, ">")),
 
     emphasis: ($) => seq($._emphasis_begin, $._inline_no_outer_whitespace, $._emphasis_end),
-    _emphasis_begin: (_) => token.immediate(choice(seq("{_", /[ ]*/), "_")),
+    _emphasis_begin: (_) => prec.dynamic(10, token.immediate(choice(seq("{_", /[ ]*/), "_"))),
     _emphasis_end: (_) => token.immediate(choice(seq(/[ ]*/, "_}"), "_")),
 
     strong: ($) => seq($._strong_begin, $._inline_no_outer_whitespace, $._strong_end),
-    _strong_begin: (_) => token.immediate(choice(seq("{*", /[ ]*/), "*")),
-    _strong_end: (_) => token.immediate(choice(seq(/[ ]*/, "*}"), "*")),
+    _strong_begin: (_) => prec.dynamic(0, choice(seq(/\{\*/, /[ ]*/), "*")),
+    _strong_end: (_) => token.immediate(choice(seq(/[ ]*/, /\*\}/), "*")),
 
     highlighted: ($) => seq(token.immediate("{="), $._inline, "=}"),
     insert: ($) => seq(token.immediate("{+"), $._inline, "+}"),
